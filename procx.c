@@ -53,13 +53,77 @@ typedef struct {
 
 // IPC MEKANIZMALARI 
 
-// shared memory ve semaphore 
-#define SHM_NAME "/procx_shm"
-#define SEM_NAME "/procx_sem"
+// IPC kaynaklari
+#define SHM_NAME "/procx_shm" //sahared memory ismi
+#define SEM_NAME "/procx_sem" //semaphor ismi
+#define MSG_Q_NAME "/procx_mq" //mesaj kuyrugu ismi
 
 SharedData *g_shared = NULL; //mmap sonucu buraya atanir
 //Hem main thread, hem monitor thread, hem de IPC listener thread bunlara erişmek zorunda bu yüzden global
-sem_t *g_sem = NULL; // semaphore pointer
+sem_t *g_sem = NULL; // global semaphore pointer
+int msg_queue_id = -1; // global mesaj kuyrugu id'si
+
+
+// IPC mekanizmalari
+void init_ipc(){
+    //shm_open() file descriptor döndürür
+    int shm_fd; // shared memory ram e baglamak icin kimlik
+
+    shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666); // shared memory olusturuyoruz
+
+    if(shm_fd == -1){ // hata kontrolu
+        perror("shm_open failed");
+        exit(EXIT_FAILURE);
+    }
+    // bellek boyutu ayarliyoruz (başlangıc boyutu 0, içine veri yazabileceğimiz fiziksel alan)
+    //mmap ile bağlamaya çalışsan bile iş mantıksız olur (okuyacak/yazacak yer yok)
+    if(ftruncate(shm_fd, sizeof(SharedData))== -1){
+        perror("ftruncate failed");
+        exit(EXIT_FAILURE);
+
+    }
+    // mmap ile shared memory i process in adres alanina bagliyoruz
+    //mmap = Kernel’deki bir dosya / shared memory nesnesini, benim process’imin sanal adres uzayına eşlemek ve bana pointer’ını vermek
+    g_shared = (SharedData *)mmap(0, sizeof(SharedData), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd,0); // MAP_SHARED: Yaptığın değişiklikler gerçek kaynağa (shared memory nesnesine) yansıtılır
+    if(g_shared == MAP_FAILED){
+        perror("mmap failed");
+        exit(EXIT_FAILURE);
+    }
+
+    close(shm_fd); // artık fd'ye ihtiyacimiz yok kapatiyoruz
+
+    //mesaj kuyrugu olusturma
+    key_t key = ftok("/tmp/procx_msgfile", 65); // ortak key olusturuyoruz
+    if(key == -1){
+        perror("ftok failed");
+        exit(EXIT_FAILURE);
+    }
+    msg_queue_id = msgget(key, 0666 | IPC_CREAT); //mesaj kuyrugu olusturuyoruz
+    if(msg_queue_id == -1){
+        perror("msgget failed");
+        exit(EXIT_FAILURE);
+    }
+
+    //semaphore olusturma
+    g_sem = sem_open(SEM_NAME, O_CREAT, 0666, 1); //1 ile baslangicta 1 kaynak var demis oluyoruz (1 -> binary semaphore, mutex davranis)
+    if(g_sem == SEM_FAILED){
+        //hata durumunda temizleme yapmasi gerekir
+        munmap(g_shared, sizeof(SharedData));
+        perror("sem_open failed");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("IPC mekanizmalari basariyla olusturuldu.\n");
+    
+}
+
+//program kapanırken ipc temizleme 
+void cleanup_ipc(){}
+
+// mesaj kuyruguna bildirim gonderme (process baslatma/sonlandirma)
+void send_notification(int command, pid_t target_pid){}
+
+
 
 // Process Baslatma
 void process_baslat(const char *command, ProcessMode mode){
@@ -86,4 +150,11 @@ void process_baslat(const char *command, ProcessMode mode){
 
     }
 }
+
+// process listeliyoruz
+void process_listeleme(){}
+
+// kullanici istegi ile process sonlandirma
+void process_sonlandir(){}
+
 
