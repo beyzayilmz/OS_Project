@@ -118,7 +118,21 @@ void init_ipc(){
 }
 
 //program kapanırken ipc temizleme 
-void cleanup_ipc(){}
+void cleanup_ipc(){
+    //shared memory temizleme
+    if(g_shared != NULL){
+        if(munmap(g_shared, sizeof(SharedData)) == -1){
+        perror("munmap failed");
+        }
+        g_shared = NULL;
+    }
+    // semaphore kapatma
+    if(g_sem != SEM_FAILED && g_sem != NULL){
+        if(sem_close(g_sem) == -1){
+            perror("sem_close failed");
+        }
+    }
+}
 
 // mesaj kuyruguna bildirim gonderme (process baslatma/sonlandirma)
 void send_notification(int command, pid_t target_pid){}
@@ -128,6 +142,8 @@ void send_notification(int command, pid_t target_pid){}
 // Process Baslatma
 void process_baslat(const char *command, ProcessMode mode){
     pid_t child_pid = fork();
+
+    int status;
 
     if(child_pid < 0){
         perror("Fork failed");
@@ -147,6 +163,11 @@ void process_baslat(const char *command, ProcessMode mode){
     }
     else{
         // PARENT PROCESS
+        if(mode == ATTACHED){
+            // attached (0) ise parent process child process'in bitmesini bekler
+            waitpid(child_pid, &status, 0); //child process bitene kadar bekler
+
+        }
 
     }
 }
