@@ -178,4 +178,17 @@ void process_listeleme(){}
 // kullanici istegi ile process sonlandirma
 void process_sonlandir(){}
 
+void display_menu() {
+    printf("\n");
+    printf("╔════════════════════════════════════╗\n");
+    printf("║         ProcX v1.0                 ║\n");
+    printf("╠════════════════════════════════════╣\n");
+    printf("║ 1. Yeni Program Çalıştır           ║\n");
+    printf("║ 2. Çalışan Programları Listele     ║\n");
+    printf("║ 3. Program Sonlandır               ║\n");
+    printf("║ 0. Çıkış                           ║\n");
+    printf("╚════════════════════════════════════╝\n");
+    printf("Seçiminiz: ");
+}
+
 
