@@ -191,13 +191,30 @@ void send_notification(int command, pid_t target_pid){
 
 
 // Process Baslatma
-void process_baslat(const char *command, ProcessMode mode){
-    pid_t child_pid = fork();
+void process_baslat(const char *command, ProcessMode mode){ //command: kullanicinin yazdiği komut "sleep 10" gibi, mode: attached/detached
 
-    int status;
+    char *cmd_copy = strdup(command); //komutu degistirmemek icin kopyaliyoruz
+    if(cmd_copy == NULL){
+        perror("srtdup failed");
+        return;
+    }
+
+    char *argv[64]; //arguman listesi
+    int argc = parse_command(cmd_copy, argv, 64, &mode); //komutu parcalayip argv ye atiyoruz
+
+    if(argc == 0){
+        fprintf(stderr, "Gecersiz komut!\n");
+        free(cmd_copy); // kopyayi serbest birak
+        return;
+    }
+
+    pid_t child_pid = fork(); //yeni process olustur
+
+    int status; // waitpid icin
 
     if(child_pid < 0){
         perror("Fork failed");
+        free(cmd_copy); 
         return;
     }
 
@@ -210,9 +227,15 @@ void process_baslat(const char *command, ProcessMode mode){
                 //continue
             }
         }
+        //int execvp(const char *dosya_adi, char *const argv[]);
+        execvp(argv[0], argv); // komutu calistir
+        perror("execvp failed");
+        _exit(EXIT_FAILURE); // hata durumunda child process sonlandir
 
     }
+
     else{
+        //burada kritik bölge mevzuları olacak!!!
         // PARENT PROCESS
         if(mode == ATTACHED){
             // attached (0) ise parent process child process'in bitmesini bekler
