@@ -64,6 +64,41 @@ sem_t *g_sem = NULL; // global semaphore pointer
 int msg_queue_id = -1; // global mesaj kuyrugu id'si
 
 
+// Kullanıcıdan alınan komut satırını parçalayıp:
+//  - argv[] dizisine argümanları yerleştirir
+//  - komutun attached mı detached mi olduğunu belirler (& işaretine bakarak)
+//  - argüman sayısını (argc) döndürür
+
+//komut satirini parcalayarak execv icin uygun hale getiren fonksiyon
+int parse_command(char*line, char **argv, int maxArgs, ProcessMode *mode_out){
+    int argc = 0; //su ana kadar bulunan arguman sayisi
+    char *token; //strtok icin bulunacak her bir kelime icin gecici pointer
+
+    //satirin sonunda varsa '\n' karakterini kaldir
+    line[strcspn(line, "\n")] = '\0';
+     *mode_out = ATTACHED; // varsayilan olarak attached
+
+     //ilk tokeni al 
+     token = strtok(line, " "); //bosluklara gore parcalama
+
+     // Tokenlar bitene kadar ve argv kapasitesi dolmayana kadar dön
+     while(token != NULL && argc < maxArgs -1){
+        //son token kontrol et
+        if(strcmp(token, "&") == 0){
+            *mode_out = DETACHED;
+            token = strtok(NULL, " "); //sonraki token e gec
+            continue;
+
+        }
+            argv[argc++] = token;
+
+            token = strtok(NULL, " "); 
+     }
+        argv[argc] = NULL; // execvp gibi fonksiyonlar icin arguman lisetsinin sonu null olmalı
+
+        return argc;
+}
+
 // IPC mekanizmalari
 void init_ipc(){
     //shm_open() file descriptor döndürür
