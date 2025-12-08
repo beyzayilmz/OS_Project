@@ -147,6 +147,10 @@ void send_notification(int command, pid_t target_pid){
     msg.command = command; // komut
     msg.sender_pid = getpid(); // gönderen pid
     msg.target_pid = target_pid; // hedef pid
+
+    if(msgsnd(msg_queue_id, &msg, sizeof(Message), 0)== -1){
+        perror("magsnd failed");
+    }
 }
 
 
@@ -185,7 +189,9 @@ void process_baslat(const char *command, ProcessMode mode){
 }
 
 // process listeliyoruz
-void process_listeleme(){}
+void process_listeleme(){
+    
+}
 
 // kullanici istegi ile process sonlandirma
 void process_sonlandir(){}
