@@ -135,7 +135,19 @@ void cleanup_ipc(){
 }
 
 // mesaj kuyruguna bildirim gonderme (process baslatma/sonlandirma)
-void send_notification(int command, pid_t target_pid){}
+void send_notification(int command, pid_t target_pid){
+
+    if(msg_queue_id == -1){
+        fprintf(stderr, "mesaj kuyrugu olusturulmamis. \n");
+        return;
+    }
+
+    Message msg;
+    msg.msg_type = 1; // mesaj tipi
+    msg.command = command; // komut
+    msg.sender_pid = getpid(); // gönderen pid
+    msg.target_pid = target_pid; // hedef pid
+}
 
 
 
