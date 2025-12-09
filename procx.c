@@ -188,6 +188,28 @@ void send_notification(int command, pid_t target_pid){
     }
 }
 
+//yeni process eklemek için bos hücre bulma
+int find_empty_process_slot(){
+
+    for(int i = 0; i < 50; i++){
+        if(g_shared->processes[i].is_active == 0){
+            return i; //bos hucre bulundu
+        }
+        return -1;
+    }
+}
+
+//tabloda verilen pid'ye sahip processin indexini bulma
+int find_by_pid(pid_t pid){
+
+    for (int i = 0; i< 50; i++){
+        if(g_shared -> processes[i].is_active &&
+            g_shared -> processes[i].pid == pid){
+                return i;
+            }
+            return -1;
+    }
+}
 
 
 // Process Baslatma
@@ -237,6 +259,8 @@ void process_baslat(const char *command, ProcessMode mode){ //command: kullanici
     else{
         //burada kritik bölge mevzuları olacak!!!
         // PARENT PROCESS
+        sem_wait(g_sem); // kritik bölgeye giris
+
         if(mode == ATTACHED){
             // attached (0) ise parent process child process'in bitmesini bekler
             waitpid(child_pid, &status, 0); //child process bitene kadar bekler
