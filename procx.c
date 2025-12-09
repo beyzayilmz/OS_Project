@@ -188,18 +188,18 @@ void send_notification(int command, pid_t target_pid){
     }
 }
 
-//yeni process eklemek için bos hücre bulma
+//yeni process eklemek için bos hücre bulma (index dondurur) (kayit ekleme fonksiyonu icin gerekli)
 int find_empty_process_slot(){
 
     for(int i = 0; i < 50; i++){
         if(g_shared->processes[i].is_active == 0){
             return i; //bos hucre bulundu
         }
-        return -1;
     }
+    return -1; //bos hucre bulunamadi
 }
 
-//tabloda verilen pid'ye sahip processin indexini bulma
+//tabloda verilen pid'ye sahip processin indexini bulma 
 int find_by_pid(pid_t pid){
 
     for (int i = 0; i< 50; i++){
@@ -207,8 +207,33 @@ int find_by_pid(pid_t pid){
             g_shared -> processes[i].pid == pid){
                 return i;
             }
-            return -1;
     }
+    return -1;
+}
+
+//shared memory kayıt ekleme fonksiyonu (paren process tarafinda cagirilacak)
+void add_process_record(pid_t child_pid, const char* command, ProcessMode mode){
+    sem_wait(g_sem); //kritik bolgeye giris yaptık (lock)
+
+    int index = find_empty_process_slot(); // bos hucre buluyoruz (index:yeni processin yazilacagi yerin indexi)
+
+    if(index != -1){
+        ProcessInfo *p = &g_shared -> processes[index]; // yeni process kaydi icin pointer
+        p->pid = child_pid; // processInfodaki process id
+        p->owner_pid = getpid(); // bu processi baslatan parent processin pid'si
+        strncpy(p->command, command, sizeof(p->command)-1); //command p->command' a kopyalanir, buffer tasmasin diye -1
+        p->command[sizeof(p->command)-1] = '\0'; //son karakter null
+        p->mode = mode; // listelemede kullanilacak
+        p->status = RUNNING; 
+        p->start_time = time(NULL);
+        p->is_active = 1;
+        g_shared ->process_count++; // kac tane aktif process var sayaci
+        printf("[BAŞLATILDI] PID: %d | Mod: %s | Komut: %s\n", 
+               child_pid, mode == ATTACHED ? "ATTACHED" : "DETACHED", command);
+    } else {
+        fprintf(stderr,"Maksimum process sayisina ulasildi!\n");
+    }
+    sem_post(g_sem); //kritik bolgeden cikis yapıldı (unlock)
 }
 
 
@@ -259,12 +284,31 @@ void process_baslat(const char *command, ProcessMode mode){ //command: kullanici
     else{
         //burada kritik bölge mevzuları olacak!!!
         // PARENT PROCESS
-        sem_wait(g_sem); // kritik bölgeye giris
+
+        //shared memory'ye process kaydi ekle
+        add_process_record(child_pid, command, mode);
+
+        //process baslatma bildirimi gonder
+        send_notification(1, child_pid); //1: start komutu
 
         if(mode == ATTACHED){
             // attached (0) ise parent process child process'in bitmesini bekler
             waitpid(child_pid, &status, 0); //child process bitene kadar bekler
+            printf("[BİTTİ] PID: %d | Komut: %s | Exit Status: %d\n", child_pid, command, WEXITSTATUS(status));
+            //child bitti guncelleme yap
+            sem_wait(g_sem); //kritik bolgeye giris
 
+            int index = find_by_pid(child_pid);
+            if(index != -1){
+                g_shared->processes[index].is_active =0;
+                g_shared->processes[index].status = TERMINATED;
+                if(g_shared->process_count >0){
+                    g_shared->process_count--;
+                }
+            }
+            sem_post(g_sem); //kritik bolgeden cikis
+            //process sonlandirma bildirimi gonder
+            send_notification(2, child_pid); //2: terminate komutu
         }
 
     }
