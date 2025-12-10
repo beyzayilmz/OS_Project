@@ -10,6 +10,7 @@
 #include <fcntl.h>      // O_CREAT, O_RDWR
 #include <sys/mman.h>   // shm_open + mmap
 #include <semaphore.h>  // sem_t, sem_open, sem_wait, sem_post
+#include <sys/wait.h>
 
 
 // VERI YAPILARI
@@ -127,6 +128,13 @@ void init_ipc(){
 
     close(shm_fd); // artık fd'ye ihtiyacimiz yok kapatiyoruz
 
+    int fd = open("/tmp/procx_msgfile", O_CREAT | O_RDWR, 0666); //ftok tan önce boş bir dosya hazırlıyoruz
+        if (fd == -1) {
+            perror("open msgfile");
+            exit(EXIT_FAILURE);
+    }
+        close(fd);
+
     //mesaj kuyrugu olusturma
     key_t key = ftok("/tmp/procx_msgfile", 65); // ortak key olusturuyoruz
     if(key == -1){
@@ -230,13 +238,13 @@ int add_process_record(pid_t child_pid, const char* command, ProcessMode mode){
         g_shared ->process_count++; // kac tane aktif process var sayaci
         printf("[BAŞLATILDI] PID: %d | Mod: %s | Komut: %s\n", 
                child_pid, mode == ATTACHED ? "ATTACHED" : "DETACHED", command);
+        sem_post(g_sem); //kritik bolgeden cikis yapıldı (unlock)       
         return index; //başarılı       
     } else {
         fprintf(stderr,"Maksimum process sayisina ulasildi!\n");
         sem_post(g_sem);
         return -1; //başarısız
     }
-    sem_post(g_sem); //kritik bolgeden cikis yapıldı (unlock)
 }
 
 
@@ -296,12 +304,77 @@ void process_baslat(const char *command, ProcessMode mode){ //command: kullanici
 
     }
 }
-//Monitor Thread: periyodik olarak process durumlarını kontrol eder
-void *monitor_thread(void *arg){}
+//Monitor Thread: periyodik olarak process durumlarını kontrol eder (health check, logging, dynamic scaling, cleanup)
+void *monitor_thread(void *arg){
+    int status;
+
+    while(1){
+        sleep(2);
+
+        sem_wait(g_sem); //shared memory erişimi için kilit
+
+        for(int i = 0; i<50; i++){
+            //sadece aktif ve bu instance tarafından başlatılmış processler 
+            if(g_shared->processes[i].is_active &&
+                g_shared->processes[i].owner_pid == getpid()){
+
+                    pid_t result = waitpid(g_shared->processes[i].pid, &status, WNOHANG);
+
+                    if(result > 0){
+                    // Process sonlanmış!
+                    printf("\n[MONITOR] Process %d sonlandı. Exit Code: %d\n", 
+                           result, WEXITSTATUS(status));
+
+                           //shared memory temizleyelim
+                           g_shared->processes[i].is_active = 0;
+                           g_shared->processes[i].status = TERMINATED;
+
+                           if(g_shared->process_count > 0){
+                            g_shared->process_count--;
+                           }
+
+                           //bildirim gönderelim
+                           send_notification(2, result);
+                    }
+                }
+        }
+        sem_post(g_sem);
+    }
+    return NULL;
+}
 
 // process listeliyoruz
-void process_listeleme(){
-    
+void process_listele() {
+    sem_wait(g_sem);
+
+    printf("\nAktif Process Listesi:\n");
+    printf("+----------+----------------------+-----------+-----------+----------+\n");
+    printf("| PID      | Komut                | Mod       | OwnerPID  | Elapsed  |\n");
+    printf("+----------+----------------------+-----------+-----------+----------+\n");
+
+    time_t now = time(NULL);
+    int active_count = 0;
+
+    for (int i = 0; i < 50; i++) {
+        if (g_shared->processes[i].is_active) {
+            ProcessInfo *p = &g_shared->processes[i];
+            double elapsed = difftime(now, p->start_time);
+
+            printf("| %-8d | %-20s | %-9s | %-9d | %-8.0f |\n",
+                   p->pid,
+                   p->command,
+                   (p->mode == DETACHED) ? "Detached" : "Attached",
+                   p->owner_pid,
+                   elapsed);
+
+            active_count++;
+        }
+    }
+
+    printf("+----------+----------------------+-----------+-----------+----------+\n");
+    printf("Toplam aktif process: %d\n\n", active_count);
+
+    sem_post(g_sem);
 }
 
 // kullanici istegi ile process sonlandirma
@@ -319,5 +392,3 @@ void display_menu() {
     printf("╚════════════════════════════════════╝\n");
     printf("Seçiminiz: ");
 }
-
-
