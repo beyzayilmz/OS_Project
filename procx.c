@@ -212,7 +212,7 @@ int find_by_pid(pid_t pid){
 }
 
 //shared memory kayıt ekleme fonksiyonu (paren process tarafinda cagirilacak)
-void add_process_record(pid_t child_pid, const char* command, ProcessMode mode){
+int add_process_record(pid_t child_pid, const char* command, ProcessMode mode){
     sem_wait(g_sem); //kritik bolgeye giris yaptık (lock)
 
     int index = find_empty_process_slot(); // bos hucre buluyoruz (index:yeni processin yazilacagi yerin indexi)
@@ -230,8 +230,11 @@ void add_process_record(pid_t child_pid, const char* command, ProcessMode mode){
         g_shared ->process_count++; // kac tane aktif process var sayaci
         printf("[BAŞLATILDI] PID: %d | Mod: %s | Komut: %s\n", 
                child_pid, mode == ATTACHED ? "ATTACHED" : "DETACHED", command);
+        return index; //başarılı       
     } else {
         fprintf(stderr,"Maksimum process sayisina ulasildi!\n");
+        sem_post(g_sem);
+        return -1; //başarısız
     }
     sem_post(g_sem); //kritik bolgeden cikis yapıldı (unlock)
 }
@@ -257,8 +260,6 @@ void process_baslat(const char *command, ProcessMode mode){ //command: kullanici
 
     pid_t child_pid = fork(); //yeni process olustur
 
-    int status; // waitpid icin
-
     if(child_pid < 0){
         perror("Fork failed");
         free(cmd_copy); 
@@ -277,7 +278,7 @@ void process_baslat(const char *command, ProcessMode mode){ //command: kullanici
         //int execvp(const char *dosya_adi, char *const argv[]);
         execvp(argv[0], argv); // komutu calistir
         perror("execvp failed");
-        _exit(EXIT_FAILURE); // hata durumunda child process sonlandir
+        exit(EXIT_FAILURE); // hata durumunda child process sonlandir
 
     }
 
@@ -291,28 +292,12 @@ void process_baslat(const char *command, ProcessMode mode){ //command: kullanici
         //process baslatma bildirimi gonder
         send_notification(1, child_pid); //1: start komutu
 
-        if(mode == ATTACHED){
-            // attached (0) ise parent process child process'in bitmesini bekler
-            waitpid(child_pid, &status, 0); //child process bitene kadar bekler
-            printf("[BİTTİ] PID: %d | Komut: %s | Exit Status: %d\n", child_pid, command, WEXITSTATUS(status));
-            //child bitti guncelleme yap
-            sem_wait(g_sem); //kritik bolgeye giris
-
-            int index = find_by_pid(child_pid);
-            if(index != -1){
-                g_shared->processes[index].is_active =0;
-                g_shared->processes[index].status = TERMINATED;
-                if(g_shared->process_count >0){
-                    g_shared->process_count--;
-                }
-            }
-            sem_post(g_sem); //kritik bolgeden cikis
-            //process sonlandirma bildirimi gonder
-            send_notification(2, child_pid); //2: terminate komutu
-        }
+        free(cmd_copy);
 
     }
 }
+//Monitor Thread: periyodik olarak process durumlarını kontrol eder
+void *monitor_thread(void *arg){}
 
 // process listeliyoruz
 void process_listeleme(){
