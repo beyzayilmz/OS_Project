@@ -378,7 +378,15 @@ void process_listele() {
 }
 
 // kullanici istegi ile process sonlandirma
-void process_sonlandir(){}
+void process_sonlandir(){
+    pid_t target_pid;
+    printf("Sonlandirilacak process PID: ");
+    scanf("%d", &target_pid);
+
+    sem_wait(g_sem);
+
+    //active ve pid target_pid ye eşitse kill yap ve bilidim gönder
+}
 
 void display_menu() {
     printf("\n");
