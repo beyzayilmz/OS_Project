@@ -386,6 +386,13 @@ void process_sonlandir(){
     sem_wait(g_sem);
 
     //active ve pid target_pid ye eşitse kill yap ve bilidim gönder
+    for(int i = 0; i<50; i++){
+        if(g_shared->processes[i].is_active && g_shared->processes[i].pid == target_pid){
+            kill(target_pid, SIGTERM);
+        }
+        send_notification(2, target_pid);
+    }
+    sem_post(g_sem);
 }
 
 void display_menu() {
