@@ -267,6 +267,7 @@ void process_baslat(const char *command, ProcessMode mode){ //command: kullanici
     }
 
     pid_t child_pid = fork(); //yeni process olustur
+    int status;
 
     if(child_pid < 0){
         perror("Fork failed");
@@ -293,15 +294,33 @@ void process_baslat(const char *command, ProcessMode mode){ //command: kullanici
     else{
         //burada kritik bölge mevzuları olacak!!!
         // PARENT PROCESS
-
+        sem_wait(g_sem);
         //shared memory'ye process kaydi ekle
         add_process_record(child_pid, command, mode);
 
         //process baslatma bildirimi gonder
         send_notification(1, child_pid); //1: start komutu
 
-        free(cmd_copy);
+        if(mode == ATTACHED){
+            // attached (0) ise parent process child process'in bitmesini bekler
+            waitpid(child_pid, &status, 0); //child process bitene kadar bekler
+            printf("[BİTTİ] PID: %d | Komut: %s | Exit Status: %d\n", child_pid, command, WEXITSTATUS(status));
+            //child bitti guncelleme yap
+            sem_wait(g_sem); //kritik bolgeye giris
 
+            int index = find_by_pid(child_pid);
+            if(index != -1){
+                g_shared->processes[index].is_active =0;
+                g_shared->processes[index].status = TERMINATED;
+                if(g_shared->process_count >0){
+                    g_shared->process_count--;
+                }
+            }
+            sem_post(g_sem); //kritik bolgeden cikis
+            //process sonlandirma bildirimi gonder
+            send_notification(2, child_pid); //2: terminate komutu
+        }
+        free(cmd_copy);
     }
 }
 //Monitor Thread: periyodik olarak process durumlarını kontrol eder (health check, logging, dynamic scaling, cleanup)
@@ -407,3 +426,4 @@ void display_menu() {
     printf("╚════════════════════════════════════╝\n");
     printf("Seçiminiz: ");
 }
+
