@@ -11,6 +11,7 @@
 #include <sys/mman.h>   // shm_open + mmap
 #include <semaphore.h>  // sem_t, sem_open, sem_wait, sem_post
 #include <sys/wait.h>
+#include <stdbool.h>
 
 
 // VERI YAPILARI
@@ -423,6 +424,9 @@ void process_sonlandir(){
 }
 
 void display_menu() {
+    char input[64];
+
+    while(true){
     printf("\n");
     printf("╔════════════════════════════════════╗\n");
     printf("║         ProcX v1.0                 ║\n");
@@ -433,5 +437,23 @@ void display_menu() {
     printf("║ 0. Çıkış                           ║\n");
     printf("╚════════════════════════════════════╝\n");
     printf("Seçiminiz: ");
+
+    if(fgets(input, sizeof(input), stdin) == NULL) return 0;
+
+    // Sadece ilk karaktere bak, ama stringin uzunluğunu da gözet
+    if(input[1] != '\n' && input[1] != '\0'){
+        printf("Please enter a single digit.\n");
+        continue;
+    }
+    switch(input[1]){
+        case '0': return 0;
+        case '1': return 1;
+        case '2': return 2;
+        case '3': return 3;
+        default:
+            printf("Invalid selection! Please use 0, 1, 2 or 3.\n");
+    }
+
+    }
 }
 
