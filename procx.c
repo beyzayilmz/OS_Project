@@ -12,6 +12,7 @@
 #include <semaphore.h>  // sem_t, sem_open, sem_wait, sem_post
 #include <sys/wait.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 
 // VERI YAPILARI
@@ -103,6 +104,11 @@ int parse_command(char*line, char **argv, int maxArgs, ProcessMode *mode_out){
 
 // IPC mekanizmalari
 void init_ipc(){
+
+    //önce temizlik yapalım (çalıştırırken hata aldım)
+    shm_unlink(SHM_NAME);
+    shm_unlink(SEM_NAME);
+    
     //shm_open() file descriptor döndürür
     int shm_fd; // shared memory ram e baglamak icin kimlik
 
@@ -361,6 +367,22 @@ void *monitor_thread(void *arg){
     }
     return NULL;
 }
+void *ipc_listener_thread(void *args){
+    Message msg;
+    while(1){
+        //msgrcv bloklayan bir çağrı , mesaj gelene kadar bekler
+        if(msgrcv(msg_queue_id, &msg, sizeof(Message),0,0) == -1){
+            perror("msgrcs failed");
+            sleep(1); //hata olursa döngü cpu yemesin
+            continue;
+        }
+
+        if(msg.sender_pid == getpid()) continue;
+
+        printf("\n[BİLDİRİM] Mesaj alındı! Gönderen PID: %d, Komut: %d\n", msg.sender_pid, msg.command);
+    }
+    return NULL;
+}
 
 // process listeliyoruz
 void process_listele() {
@@ -423,7 +445,7 @@ void process_sonlandir(){
     
 }
 
-void display_menu() {
+int display_menu() {
     char input[64];
 
     while(true){
@@ -455,5 +477,39 @@ void display_menu() {
     }
 
     }
+}
+
+int main() {
+    // 1. IPC kaynaklarını hazırla
+    init_ipc();
+
+    // 2. Threadleri oluştur
+    pthread_t monitor_tid, listener_tid;
+
+    // Monitor thread başlat
+    if (pthread_create(&monitor_tid, NULL, monitor_thread, NULL) != 0) {
+        perror("Monitor thread oluşturulamadı");
+        exit(EXIT_FAILURE);
+    }
+
+    // IPC Listener thread başlat
+    if (pthread_create(&listener_tid, NULL, ipc_listener_thread, NULL) != 0) {
+        perror("Listener thread oluşturulamadı");
+        exit(EXIT_FAILURE);
+    }
+
+    // Threadlerin sistemden bağımsız çalışabilmesi için detach edebiliriz
+    // Böylece main bitince kaynakları temizlemekle uğraşmayız (opsiyonel)
+    pthread_detach(monitor_tid);
+    pthread_detach(listener_tid);
+
+    // 3. UI Menüsünü göster (Main Thread burada dönecek)
+    display_menu();
+
+    // 4. Çıkış ve Temizlik
+    cleanup_ipc();
+    printf("Program sonlandiriliyor...\n");
+    
+    return 0;
 }
 
