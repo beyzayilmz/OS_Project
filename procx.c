@@ -79,7 +79,6 @@ int parse_command(char*line, char **argv, int maxArgs, ProcessMode *mode_out){
 
     //satirin sonunda varsa '\n' karakterini kaldir
     line[strcspn(line, "\n")] = '\0';
-     *mode_out = ATTACHED; // varsayilan olarak attached
 
      //ilk tokeni al 
      token = strtok(line, " "); //bosluklara gore parcalama
@@ -329,6 +328,53 @@ void process_baslat(const char *command, ProcessMode mode){ //command: kullanici
         free(cmd_copy);
     }
 }
+
+//kullanıcıdan komut alıp process_baslat() ı çağıran fonksiyon
+void yeni_program_baslat(){
+    char cmd_buffer[256];
+    char mode_buffer[64];
+
+    ProcessMode secilen_mode;
+    //1. komutu al
+    printf("Çalıştırılacak komutu girin (örn: sleep 10) : ");
+
+    //gücenli input alma
+    if(fgets(cmd_buffer, sizeof(cmd_buffer), stdin) != NULL){
+        //sondaki \n karakterini temizleyelim
+        cmd_buffer[strcspn(cmd_buffer, "\n")] = 0;
+    }else{
+        return;
+        }//boş giriş kontrolü
+        if(strlen(cmd_buffer) == 0){
+            printf("Hata: boş komut girdiniz.\n");
+            return;
+        }
+        //2. Modu sor
+        while(true){
+            printf("Mod seçin (0: Attached, 1: Detached):");
+            if(fgets(mode_buffer, sizeof(mode_buffer), stdin) != NULL){
+                mode_buffer[strcspn(mode_buffer, "\n")] = 0; //enter karakterini temizle
+
+                if(strcmp(mode_buffer, "0") == 0){
+                    secilen_mode = ATTACHED;
+                    break;
+                }
+                else if(strcmp(mode_buffer, "1") == 0){
+                    secilen_mode = DETACHED;
+                    break;
+                }
+                else{
+                    printf("Hata: Lütfen sadece 0 veya 1 giriniz.\n");
+                }
+            }else{
+                return;
+            }
+        }
+        //3. Process başlat
+        process_baslat(cmd_buffer, secilen_mode);
+        
+    }
+
 //Monitor Thread: periyodik olarak process durumlarını kontrol eder (health check, logging, dynamic scaling, cleanup)
 void *monitor_thread(void *arg){
     int status;
@@ -420,15 +466,25 @@ void process_listele() {
 
 // kullanici istegi ile process sonlandirma
 void process_sonlandir(){
+    char input[64];
     pid_t target_pid;
+
     printf("Sonlandirilacak process PID: ");
-    scanf("%d", &target_pid);
+    //scanf("%d", &target_pid); (buffer sorunu)
+
+    //scanf yerine fgets kullanarak buffer sorununu çözüyoruz
+    if(fgets(input, sizeof(input), stdin) != NULL){
+        target_pid = atoi(input); //stringi int e çevirme
+    }else{
+        return;
+    }
 
     sem_wait(g_sem);
 
     int found = 0;
     //active ve pid target_pid ye eşitse kill yap ve bilidim gönder
     for(int i = 0; i<50; i++){
+        //sadece kendi başlattığımız processleri silebiliriz
         if(g_shared->processes[i].is_active && g_shared->processes[i].pid == target_pid && 
             g_shared->processes[i].owner_pid == getpid()){
             kill(target_pid, SIGTERM);
@@ -438,6 +494,7 @@ void process_sonlandir(){
     }
     sem_post(g_sem);
     if(found){
+        printf("PID %d sonlandırma sinyali gönderildi. \n", target_pid);
         send_notification(2, target_pid);
     }else{
         printf("Bu PID'e ait aktif process bulunamadi. \n");
@@ -448,34 +505,35 @@ void process_sonlandir(){
 int display_menu() {
     char input[64];
 
-    while(true){
-    printf("\n");
-    printf("╔════════════════════════════════════╗\n");
-    printf("║         ProcX v1.0                 ║\n");
-    printf("╠════════════════════════════════════╣\n");
-    printf("║ 1. Yeni Program Çalıştır           ║\n");
-    printf("║ 2. Çalışan Programları Listele     ║\n");
-    printf("║ 3. Program Sonlandır               ║\n");
-    printf("║ 0. Çıkış                           ║\n");
-    printf("╚════════════════════════════════════╝\n");
-    printf("Seçiminiz: ");
+    while (true) {
+        printf("\n");
+        printf("╔════════════════════════════════════╗\n");
+        printf("║         ProcX v1.0                 ║\n");
+        printf("╠════════════════════════════════════╣\n");
+        printf("║ 1. Yeni Program Çalıştır           ║\n");
+        printf("║ 2. Çalışan Programları Listele     ║\n");
+        printf("║ 3. Program Sonlandır               ║\n");
+        printf("║ 0. Çıkış                           ║\n");
+        printf("╚════════════════════════════════════╝\n");
+        printf("Seçiminiz: ");
 
-    if(fgets(input, sizeof(input), stdin) == NULL) return 0;
+        if (!fgets(input, sizeof(input), stdin)) return 0;
 
-    // Sadece ilk karaktere bak, ama stringin uzunluğunu da gözet
-    if(input[1] != '\n' && input[1] != '\0'){
-        printf("Please enter a single digit.\n");
-        continue;
-    }
-    switch(input[1]){
-        case '0': return 0;
-        case '1': return 1;
-        case '2': return 2;
-        case '3': return 3;
-        default:
+        // baştaki boşlukları temizle
+        char *p = input;
+        while (*p == ' ' || *p == '\t') p++;
+
+        // sadece tek hane kabul: '0'..'3' + newline
+        if (p[0] < '0' || p[0] > '3') {
             printf("Invalid selection! Please use 0, 1, 2 or 3.\n");
-    }
+            continue;
+        }
+        if (p[1] != '\n' && p[1] != '\0') {
+            printf("Please enter a single digit.\n");
+            continue;
+        }
 
+        return p[0] - '0';
     }
 }
 
@@ -498,17 +556,39 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    // Threadlerin sistemden bağımsız çalışabilmesi için detach edebiliriz
-    // Böylece main bitince kaynakları temizlemekle uğraşmayız (opsiyonel)
+    // Threadlerin sistemden bağımsız çalışabilmesi için detach edebiliriz(main bitince kendi hallerinde ölsünler veya temizlensinler)
     pthread_detach(monitor_tid);
     pthread_detach(listener_tid);
 
+    bool running = true;
     // 3. UI Menüsünü göster (Main Thread burada dönecek)
-    display_menu();
+    while(running){
+        int choice = display_menu();
+        if(choice == -1 ) continue;
+
+        switch (choice)
+        {
+        case 0://ÇIKIŞ
+            printf("Program sonlandiriliyor...\n");
+            running = false;
+            break;
+        case 1://YENİ PROGRAM BAŞLAT
+            yeni_program_baslat();
+            break;
+        case 2://LİSTELE
+            process_listele();
+            break;
+        case 3: //SONLANDIR
+            process_sonlandir();
+            break; 
+        default:
+        printf("Geçersiz seçim.\n");
+            break;
+        }
+    }
 
     // 4. Çıkış ve Temizlik
     cleanup_ipc();
-    printf("Program sonlandiriliyor...\n");
     
     return 0;
 }
