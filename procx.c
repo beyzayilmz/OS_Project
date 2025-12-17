@@ -60,6 +60,7 @@ typedef struct {
 #define SHM_NAME "/procx_shm" //sahared memory ismi
 #define SEM_NAME "/procx_sem" //semaphor ismi
 #define MSG_Q_NAME "/procx_mq" //mesaj kuyrugu ismi
+#define MSGSZ (sizeof(Message) - sizeof(long))
 
 SharedData *g_shared = NULL; //mmap sonucu buraya atanir
 //Hem main thread, hem monitor thread, hem de IPC listener thread bunlara erişmek zorunda bu yüzden global
@@ -106,7 +107,7 @@ void init_ipc(){
 
     //önce temizlik yapalım (çalıştırırken hata aldım)
     shm_unlink(SHM_NAME);
-    shm_unlink(SEM_NAME);
+    sem_unlink(SEM_NAME);
     
     //shm_open() file descriptor döndürür
     int shm_fd; // shared memory ram e baglamak icin kimlik
@@ -166,6 +167,7 @@ void init_ipc(){
     
 }
 
+
 //program kapanırken ipc temizleme 
 void cleanup_ipc(){
     //shared memory temizleme
@@ -180,6 +182,7 @@ void cleanup_ipc(){
         if(sem_close(g_sem) == -1){
             perror("sem_close failed");
         }
+        sem_unlink(SEM_NAME);
     }
 }
 
@@ -197,7 +200,7 @@ void send_notification(int command, pid_t target_pid){
     msg.sender_pid = getpid(); // gönderen pid
     msg.target_pid = target_pid; // hedef pid
 
-    if(msgsnd(msg_queue_id, &msg, sizeof(Message), 0)== -1){
+    if(msgsnd(msg_queue_id, &msg, MSGSZ, 0)== -1){
         perror("magsnd failed");
     }
 }
@@ -306,7 +309,7 @@ void process_baslat(const char *command, ProcessMode mode){ //command: kullanici
         //process baslatma bildirimi gonder
         send_notification(1, child_pid); //1: start komutu
 
-        if(mode == ATTACHED){
+        if(mode == ATTACHED){ //çalışan process bitene kadar terminal kitlenir
             // attached (0) ise parent process child process'in bitmesini bekler
             waitpid(child_pid, &status, 0); //child process bitene kadar bekler
             printf("[BİTTİ] PID: %d | Komut: %s | Exit Status: %d\n", child_pid, command, WEXITSTATUS(status));
@@ -389,6 +392,12 @@ void *monitor_thread(void *arg){
             if(g_shared->processes[i].is_active &&
                 g_shared->processes[i].owner_pid == getpid()){
 
+                    // Eğer process ATTACHED ise, main thread zaten onu waitpid ile bekliyor.
+                    // Monitor thread buna karışmasın, yoksa çakışma olur ve araya yazı girer.
+                    if(g_shared->processes[i].mode == ATTACHED) {
+                        continue; 
+                    }
+
                     pid_t result = waitpid(g_shared->processes[i].pid, &status, WNOHANG);
 
                     if(result > 0){
@@ -417,7 +426,7 @@ void *ipc_listener_thread(void *args){
     Message msg;
     while(1){
         //msgrcv bloklayan bir çağrı , mesaj gelene kadar bekler
-        if(msgrcv(msg_queue_id, &msg, sizeof(Message),0,0) == -1){
+        if(msgrcv(msg_queue_id, &msg, MSGSZ,0,0) == -1){
             perror("msgrcs failed");
             sleep(1); //hata olursa döngü cpu yemesin
             continue;
@@ -481,25 +490,37 @@ void process_sonlandir(){
 
     sem_wait(g_sem);
 
-    int found = 0;
+    int index = -1;
     //active ve pid target_pid ye eşitse kill yap ve bilidim gönder
     for(int i = 0; i<50; i++){
         //sadece kendi başlattığımız processleri silebiliriz
         if(g_shared->processes[i].is_active && g_shared->processes[i].pid == target_pid && 
             g_shared->processes[i].owner_pid == getpid()){
-            kill(target_pid, SIGTERM);
-            found = 1;
+            index = i;
             break;
         }  
-    }
-    sem_post(g_sem);
-    if(found){
-        printf("PID %d sonlandırma sinyali gönderildi. \n", target_pid);
+    }if(index != -1){
+        //SIGTERM gönder
+        if(kill(target_pid, SIGTERM) == -1){
+            perror("kill failed");
+            sem_post(g_sem);
+            return;
+        }
+        //shared memoryden hemen sil / pasife çek
+        g_shared->processes[index].status = TERMINATED;
+        g_shared->processes[index].is_active = 0;
+
+        if(g_shared->process_count > 0){
+            g_shared->process_count--;
+        }
+        sem_post(g_sem);
+        printf("PID %d sonlandirma sinyali gönderildi ve shared memory kaydı silindi.\n", target_pid);
+
         send_notification(2, target_pid);
     }else{
-        printf("Bu PID'e ait aktif process bulunamadi. \n");
+        sem_post(g_sem);
+        printf("Bu PID'e ait aktif process bulunamadi (veya size ait degil).\n");
     }
-    
 }
 
 int display_menu() {
