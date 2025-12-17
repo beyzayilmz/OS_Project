@@ -434,7 +434,13 @@ void *ipc_listener_thread(void *args){
 
         if(msg.sender_pid == getpid()) continue;
 
-        printf("\n[BİLDİRİM] Mesaj alındı! Gönderen PID: %d, Komut: %d\n", msg.sender_pid, msg.command);
+        if(msg.command == 1){
+            printf("\n[IPC] Yeni process başlatıldı : PID %d \n", msg.sender_pid);
+            printf("\n[IPC] Yeni process başlatıldı : PID %d \n", msg.target_pid);
+        }
+        else if(msg.command == 2){
+            printf("\n[IPC] Process sonlandı : PID %d \n", msg.target_pid);
+        }
     }
     return NULL;
 }
