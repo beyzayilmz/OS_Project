@@ -1,20 +1,28 @@
+# Derleyici
 CC = gcc
-CFLAGS = -Wall -g -pthread
-LDFLAGS = -lrt -pthread
 
+# Derleme Bayrakları
+# -Wall: Uyarıları aç
+# -pthread: Thread desteği (macOS'ta da gereklidir/zararı yoktur)
+CFLAGS = -Wall -pthread
+
+# Bağlayıcı Bayrakları (Linker Flags)
+# macOS'ta -lrt GEREKMEZ, bu yüzden burayı boş bırakıyoruz.
+LDFLAGS = 
+
+# Hedef dosya adı
 TARGET = procx
-SRC = procx.c
-OBJ = $(SRC:.c=.o)
 
+# Kaynak dosyası
+SRC = procx.c
+
+# Varsayılan kural
 all: $(TARGET)
 
-$(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+# Derleme kuralı
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) $(SRC) -o $(TARGET) $(LDFLAGS)
 
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
+# Temizlik kuralı
 clean:
-	rm -f $(OBJ) $(TARGET)
-	# IPC nesnelerini temizlemek için manuel komutlar gerekebilir
-	# örn: rm /dev/shm/procx_shm
+	rm -f $(TARGET)
