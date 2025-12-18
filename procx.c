@@ -1,3 +1,5 @@
+//Created by Beyza Yılmaz on 03.12.2025
+
 #include <stdio.h>
 #include <stdlib.h> //exit malloc free
 #include <string.h>
@@ -67,6 +69,9 @@ SharedData *g_shared = NULL; //mmap sonucu buraya atanir
 //Hem main thread, hem monitor thread, hem de IPC listener thread bunlara erişmek zorunda bu yüzden global
 sem_t *g_sem = NULL; // global semaphore pointer
 int msg_queue_id = -1; // global mesaj kuyrugu id'si
+// volatile: Derleyiciye "bu değişken her an dışarıdan değişebilir, optimize etme" der.
+// sig_atomic_t: Kesintiye uğramadan okunup yazılabilen veri tipidir
+volatile sig_atomic_t stop_flag = 0;
 
 
 // Kullanıcıdan alınan komut satırını parçalayıp:
@@ -221,10 +226,7 @@ void kill_child_process(){
 }
 
 void siginit_handler(int sig){
-    printf("\n[Sinyal] Ctrl+C algılandı. Kaynaklar temizleniyor...\n");
-    kill_child_process();
-    cleanup_ipc();
-    exit(0);
+    stop_flag = 1;
 }
 
 // mesaj kuyruguna bildirim gonderme (process baslatma/sonlandirma)
@@ -591,8 +593,10 @@ int display_menu() {
         printf("╚════════════════════════════════════╝\n");
         printf("Seçiminiz: ");
 
-        if (!fgets(input, sizeof(input), stdin)) return 0;
-
+        if (!fgets(input, sizeof(input), stdin)) {
+        // Eğer sinyal geldiyse veya hata olduysa -1 dönelim ki main döngüsü anlasın
+        return -1; 
+        }
         // baştaki boşlukları temizle
         char *p = input;
         while (*p == ' ' || *p == '\t') p++;
@@ -612,7 +616,17 @@ int display_menu() {
 }
 
 int main() {
-    signal(SIGINT, siginit_handler); //burda deadlock olabilir tekrar bakılcak
+    // signal() yerine sigaction kullanıyoruz.
+    // Bu sayede fgets() gibi sistem çağrılarının "Restart" etmesini engelliyoruz.
+    struct sigaction sa;
+    sa.sa_handler = siginit_handler;
+    sa.sa_flags = 0; // ÖNEMLİ: SA_RESTART flag'ini koymuyoruz! fgets yarıda kesilsin.
+    sigemptyset(&sa.sa_mask);
+
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("Sigaction hatası");
+        exit(EXIT_FAILURE);
+    }
     // 1. IPC kaynaklarını hazırla
     init_ipc();
 
@@ -636,28 +650,34 @@ int main() {
     pthread_detach(listener_tid);
 
     bool running = true;
-    // 3. UI Menüsünü göster (Main Thread burada dönecek)
-    while(running){
-        int choice = display_menu();
-        if(choice == -1 ) continue;
+    //3. UI Menüsünü göster (Main Thread burada dönecek) (stop_flag kontrolü eklendi)
+    while(running && !stop_flag){ 
+        int choice = display_menu(); 
+
+        // Eğer kullanıcı Ctrl+C'ye menüdeyken bastıysa:
+        if (stop_flag) {
+            printf("\n[Sistem] Çıkış sinyali alındı...\n");
+            break; // Döngüden çık
+        }
+
+        if(choice == -1 ) continue; // Hatalı giriş
 
         switch (choice)
         {
-        case 0://ÇIKIŞ
+        case 0: // ÇIKIŞ
             printf("Program sonlandiriliyor...\n");
             running = false;
             break;
-        case 1://YENİ PROGRAM BAŞLAT
+        case 1: // YENİ PROGRAM
             yeni_program_baslat();
             break;
-        case 2://LİSTELE
+        case 2: // LİSTELE
             process_listele();
             break;
-        case 3: //SONLANDIR
+        case 3: // SONLANDIR
             process_sonlandir();
             break; 
         default:
-        printf("Geçersiz seçim.\n");
             break;
         }
     }
@@ -668,4 +688,3 @@ int main() {
     
     return 0;
 }
-
