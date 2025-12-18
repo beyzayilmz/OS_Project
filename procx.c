@@ -186,6 +186,27 @@ void cleanup_ipc(){
     }
 }
 
+//program kapanırken attached processleri temizleme
+void kill_child_process(){
+    sem_wait(g_sem);
+    pid_t my_pid = getpid();
+
+    //aktifse, attached ise ve bana aitse tablodan silelim 
+    for(int i = 0; i<50; i++){
+        if(g_shared->processes[i].is_active &&
+            g_shared->processes[i].mode == ATTACHED &&
+            g_shared->processes[i].owner_pid == my_pid){
+                 printf("Çıkış öncesi ATTACHED process sonlandırılıyor. %d\n", g_shared->processes[i].pid);
+                 kill(g_shared->processes[i].pid, SIGTERM);
+
+                 g_shared->processes[i].is_active = 0;
+                 g_shared->processes[i].status = TERMINATED;
+                 if(g_shared->process_count > 0) g_shared->process_count--;
+            }
+    }
+    sem_post(g_sem);
+}
+
 // mesaj kuyruguna bildirim gonderme (process baslatma/sonlandirma)
 void send_notification(int command, pid_t target_pid){
 
@@ -435,11 +456,12 @@ void *ipc_listener_thread(void *args){
         if(msg.sender_pid == getpid()) continue;
 
         if(msg.command == 1){
-            printf("\n[IPC] Yeni process başlatıldı : PID %d \n", msg.sender_pid);
-            printf("\n[IPC] Yeni process başlatıldı : PID %d \n", msg.target_pid);
+            printf("\n[IPC] Yeni process başlatıldı: PID %d (Gönderen: %d)\n",
+                    msg.target_pid, msg.sender_pid);
         }
         else if(msg.command == 2){
-            printf("\n[IPC] Process sonlandı : PID %d \n", msg.target_pid);
+            printf("\n[IPC] Process sonlandırıldı: PID %d (Gönderen: %d)\n",
+                    msg.target_pid, msg.sender_pid);
         }
     }
     return NULL;
@@ -615,6 +637,7 @@ int main() {
     }
 
     // 4. Çıkış ve Temizlik
+    kill_child_process();
     cleanup_ipc();
     
     return 0;
