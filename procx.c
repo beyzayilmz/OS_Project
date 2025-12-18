@@ -165,7 +165,11 @@ void init_ipc() {
         perror("msgget failed");
         exit(EXIT_FAILURE);
     }
-
+    //program her başladığında kuyrukta kalan eski mesajları sil 
+    Message temp;
+    while(msgrcv(msg_queue_id, &temp, MSGSZ, 0, IPC_NOWAIT) != -1){
+        printf("[IPC] Eski oturumdan kalan mesaj temizlendi (PID: %d)\n", temp.sender_pid);
+    }
     // --- SEMAPHORE ---
     // Semaphore zaten varsa bağlanır, yoksa 1 değeriyle oluşturur.
     g_sem = sem_open(SEM_NAME, O_CREAT, 0666, 1);
@@ -216,6 +220,13 @@ void kill_child_process(){
     sem_post(g_sem);
 }
 
+void siginit_handler(int sig){
+    printf("\n[Sinyal] Ctrl+C algılandı. Kaynaklar temizleniyor...\n");
+    kill_child_process();
+    cleanup_ipc();
+    exit(0);
+}
+
 // mesaj kuyruguna bildirim gonderme (process baslatma/sonlandirma)
 void send_notification(int command, pid_t target_pid){
 
@@ -223,7 +234,6 @@ void send_notification(int command, pid_t target_pid){
         fprintf(stderr, "mesaj kuyrugu olusturulmamis. \n");
         return;
     }
-
     Message msg;
     msg.msg_type = 1; // mesaj tipi
     msg.command = command; // komut
@@ -462,7 +472,11 @@ void *ipc_listener_thread(void *args){
             continue;
         }
 
-        if(msg.sender_pid == getpid()) continue;
+        if(msg.sender_pid == getpid()){
+            msgsnd(msg_queue_id, &msg, MSGSZ, 0);
+            usleep(100000);
+            continue;
+        } 
 
         if(msg.command == 1){
             printf("\n[IPC] Yeni process başlatıldı: PID %d (Gönderen: %d)\n",
@@ -552,20 +566,13 @@ void process_sonlandir(){
             sem_post(g_sem);
             return;
         }
-        //shared memoryden hemen sil / pasife çek
-        g_shared->processes[index].status = TERMINATED;
-        g_shared->processes[index].is_active = 0;
+        printf("[INFO] Process %d'e SIGTERM sinyali gönderildi.\n", target_pid);
+        printf("# Monitor thread sonlanmayı tespit edip raporlayacak...\n");
 
-        if(g_shared->process_count > 0){
-            g_shared->process_count--;
-        }
         sem_post(g_sem);
-        printf("PID %d sonlandirma sinyali gönderildi ve shared memory kaydı silindi.\n", target_pid);
-
-        send_notification(2, target_pid);
     }else{
         sem_post(g_sem);
-        printf("Bu PID'e ait aktif process bulunamadi (veya size ait degil).\n");
+        printf("Bu PID'e ait aktif process bulunamadi.\n");
     }
 }
 
@@ -605,6 +612,7 @@ int display_menu() {
 }
 
 int main() {
+    signal(SIGINT, siginit_handler); //burda deadlock olabilir tekrar bakılcak
     // 1. IPC kaynaklarını hazırla
     init_ipc();
 
