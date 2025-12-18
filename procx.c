@@ -129,16 +129,14 @@ void init_ipc() {
         }
     } 
     else {
-        // Bir hata aldık. Eğer hata "Zaten var (EEXIST)" ise sorun yok, bağlanacağız.
         if (errno == EEXIST) {
             printf("[IPC] Var olan kaynağa bağlanılıyor (Client)...\n");
-            shm_fd = shm_open(SHM_NAME, O_RDWR, 0666); // O_CREAT yok
+            shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
             if (shm_fd == -1) {
                 perror("shm_open (connect) failed");
                 exit(EXIT_FAILURE);
             }
         } else {
-            // EEXIST dışında bir hataysa gerçekten sorun vardır
             perror("shm_open (create) failed");
             exit(EXIT_FAILURE);
         }
@@ -151,9 +149,9 @@ void init_ipc() {
         exit(EXIT_FAILURE);
     }
 
-    // Eğer ilk yaratansa, içinin temiz olduğundan emin ol (sıfırla)
+    // Eğer ilk yaratansa, içinin temiz olduğundan emin olalım
     if (is_creator) {
-        // SharedData yapısının içini sıfırla ki çöp veri kalmasın
+        // SharedData yapısının içini sıfırlayalım ki çöp veri kalmasın
         memset(g_shared, 0, sizeof(SharedData));
     }
 
@@ -170,7 +168,7 @@ void init_ipc() {
         perror("msgget failed");
         exit(EXIT_FAILURE);
     }
-    //program her başladığında kuyrukta kalan eski mesajları sil 
+    //program her başladığında kuyrukta kalan eski mesajları sil (hata aldım)
     Message temp;
     while(msgrcv(msg_queue_id, &temp, MSGSZ, 0, IPC_NOWAIT) != -1){
         printf("[IPC] Eski oturumdan kalan mesaj temizlendi (PID: %d)\n", temp.sender_pid);
@@ -343,7 +341,6 @@ void process_baslat(const char *command, ProcessMode mode){ //command: kullanici
     }
 
     else{
-        //burada kritik bölge mevzuları olacak!!!
         // PARENT PROCESS
         //shared memory'ye process kaydi ekle
         add_process_record(child_pid, command, mode);
@@ -618,12 +615,12 @@ int display_menu() {
 int main() {
     // signal() yerine sigaction kullanıyoruz.
     // Bu sayede fgets() gibi sistem çağrılarının "Restart" etmesini engelliyoruz.
-    struct sigaction sa;
-    sa.sa_handler = siginit_handler;
-    sa.sa_flags = 0; // ÖNEMLİ: SA_RESTART flag'ini koymuyoruz! fgets yarıda kesilsin.
-    sigemptyset(&sa.sa_mask);
+    struct sigaction sinyal;
+    sinyal.sa_handler = siginit_handler;
+    sinyal.sa_flags = 0; // ÖNEMLİ: SA_RESTART flag'ini koymuyoruz! fgets yarıda kesilsin.
+    sigemptyset(&sinyal.sa_mask);
 
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
+    if (sigaction(SIGINT, &sinyal, NULL) == -1) {
         perror("Sigaction hatası");
         exit(EXIT_FAILURE);
     }
