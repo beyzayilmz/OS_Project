@@ -490,6 +490,16 @@ void process_listele() {
 
     for (int i = 0; i < 50; i++) {
         if (g_shared->processes[i].is_active) {
+            //process gerçekten hayatta mı kontrol et(kill(pid, 0) sinyal göndermez, kontrol eder)
+            if(kill(g_shared->processes[i].pid, 0) == -1){
+                if (errno == ESRCH) { // ESRCH: No such process (Process ölmüş)
+                    g_shared->processes[i].is_active = 0;
+                    g_shared->processes[i].status = TERMINATED;
+                    if(g_shared->process_count > 0) g_shared->process_count--;
+                    //ölü olduğu için yazdırma döngünün başına dön
+                    continue;
+                }
+            }
             ProcessInfo *p = &g_shared->processes[i];
             double elapsed = difftime(now, p->start_time);
 
