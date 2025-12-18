@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <errno.h> // errno kullanmak için 
 
 
 // VERI YAPILARI
@@ -103,68 +104,75 @@ int parse_command(char*line, char **argv, int maxArgs, ProcessMode *mode_out){
 }
 
 // IPC mekanizmalari
-void init_ipc(){
+void init_ipc() {
+    int shm_fd;
+    int is_creator = 0; // Biz mi yarattık kontrolü
 
-    //önce temizlik yapalım (çalıştırırken hata aldım)
-    shm_unlink(SHM_NAME);
-    sem_unlink(SEM_NAME);
-    
-    //shm_open() file descriptor döndürür
-    int shm_fd; // shared memory ram e baglamak icin kimlik
+    // 1. Önce "Sadece yoksa yarat" modunda açmayı dene (O_EXCL)
+    shm_fd = shm_open(SHM_NAME, O_CREAT | O_EXCL | O_RDWR, 0666);
 
-    shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666); // shared memory olusturuyoruz
+    if (shm_fd != -1) {
+        // Dosyayı biz yarattık, demek ki İLK biziz.
+        is_creator = 1;
+        printf("[IPC] İlk process başlatıldı (Creator).\n");
 
-    if(shm_fd == -1){ // hata kontrolu
-        perror("shm_open failed");
-        exit(EXIT_FAILURE);
+        // Sadece ilk yaratan boyutlandırma (ftruncate) yapar
+        if (ftruncate(shm_fd, sizeof(SharedData)) == -1) {
+            perror("ftruncate failed");
+            shm_unlink(SHM_NAME); // Hata varsa temizle
+            exit(EXIT_FAILURE);
+        }
+    } 
+    else {
+        // Bir hata aldık. Eğer hata "Zaten var (EEXIST)" ise sorun yok, bağlanacağız.
+        if (errno == EEXIST) {
+            printf("[IPC] Var olan kaynağa bağlanılıyor (Client)...\n");
+            shm_fd = shm_open(SHM_NAME, O_RDWR, 0666); // O_CREAT yok
+            if (shm_fd == -1) {
+                perror("shm_open (connect) failed");
+                exit(EXIT_FAILURE);
+            }
+        } else {
+            // EEXIST dışında bir hataysa gerçekten sorun vardır
+            perror("shm_open (create) failed");
+            exit(EXIT_FAILURE);
+        }
     }
-    // bellek boyutu ayarliyoruz (başlangıc boyutu 0, içine veri yazabileceğimiz fiziksel alan)
-    //mmap ile bağlamaya çalışsan bile iş mantıksız olur (okuyacak/yazacak yer yok)
-    if(ftruncate(shm_fd, sizeof(SharedData))== -1){
-        perror("ftruncate failed");
-        exit(EXIT_FAILURE);
 
-    }
-    // mmap ile shared memory i process in adres alanina bagliyoruz
-    //mmap = Kernel’deki bir dosya / shared memory nesnesini, benim process’imin sanal adres uzayına eşlemek ve bana pointer’ını vermek
-    g_shared = (SharedData *)mmap(0, sizeof(SharedData), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd,0); // MAP_SHARED: Yaptığın değişiklikler gerçek kaynağa (shared memory nesnesine) yansıtılır
-    if(g_shared == MAP_FAILED){
+    // 2. Map işlemi 
+    g_shared = (SharedData *)mmap(0, sizeof(SharedData), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (g_shared == MAP_FAILED) {
         perror("mmap failed");
         exit(EXIT_FAILURE);
     }
 
-    close(shm_fd); // artık fd'ye ihtiyacimiz yok kapatiyoruz
-
-    int fd = open("/tmp/procx_msgfile", O_CREAT | O_RDWR, 0666); //ftok tan önce boş bir dosya hazırlıyoruz
-        if (fd == -1) {
-            perror("open msgfile");
-            exit(EXIT_FAILURE);
+    // Eğer ilk yaratansa, içinin temiz olduğundan emin ol (sıfırla)
+    if (is_creator) {
+        // SharedData yapısının içini sıfırla ki çöp veri kalmasın
+        memset(g_shared, 0, sizeof(SharedData));
     }
-        close(fd);
 
-    //mesaj kuyrugu olusturma
-    key_t key = ftok("/tmp/procx_msgfile", 65); // ortak key olusturuyoruz
-    if(key == -1){
-        perror("ftok failed");
-        exit(EXIT_FAILURE);
-    }
-    msg_queue_id = msgget(key, 0666 | IPC_CREAT); //mesaj kuyrugu olusturuyoruz
-    if(msg_queue_id == -1){
+    close(shm_fd);
+
+    // --- MESSAGE QUEUE ---
+    // Dosya yoksa oluştur (ftok için)
+    int fd = open("/tmp/procx_msgfile", O_CREAT | O_RDWR, 0666);
+    close(fd);
+
+    key_t key = ftok("/tmp/procx_msgfile", 65);
+    msg_queue_id = msgget(key, 0666 | IPC_CREAT);
+    if (msg_queue_id == -1) {
         perror("msgget failed");
         exit(EXIT_FAILURE);
     }
 
-    //semaphore olusturma
-    g_sem = sem_open(SEM_NAME, O_CREAT, 0666, 1); //1 ile baslangicta 1 kaynak var demis oluyoruz (1 -> binary semaphore, mutex davranis)
-    if(g_sem == SEM_FAILED){
-        //hata durumunda temizleme yapmasi gerekir
-        munmap(g_shared, sizeof(SharedData));
+    // --- SEMAPHORE ---
+    // Semaphore zaten varsa bağlanır, yoksa 1 değeriyle oluşturur.
+    g_sem = sem_open(SEM_NAME, O_CREAT, 0666, 1);
+    if (g_sem == SEM_FAILED) {
         perror("sem_open failed");
         exit(EXIT_FAILURE);
     }
-
-    printf("IPC mekanizmalari basariyla olusturuldu.\n");
-    
 }
 
 
@@ -184,6 +192,7 @@ void cleanup_ipc(){
         }
         sem_unlink(SEM_NAME);
     }
+    printf("Process kaynaklardan ayrıldı (Kaynaklar hala aktif).\n");
 }
 
 //program kapanırken attached processleri temizleme
@@ -191,7 +200,7 @@ void kill_child_process(){
     sem_wait(g_sem);
     pid_t my_pid = getpid();
 
-    //aktifse, attached ise ve bana aitse tablodan silelim 
+    //aktifse, attached ise tablodan silelim 
     for(int i = 0; i<50; i++){
         if(g_shared->processes[i].is_active &&
             g_shared->processes[i].mode == ATTACHED &&
@@ -522,8 +531,7 @@ void process_sonlandir(){
     //active ve pid target_pid ye eşitse kill yap ve bilidim gönder
     for(int i = 0; i<50; i++){
         //sadece kendi başlattığımız processleri silebiliriz
-        if(g_shared->processes[i].is_active && g_shared->processes[i].pid == target_pid && 
-            g_shared->processes[i].owner_pid == getpid()){
+        if(g_shared->processes[i].is_active && g_shared->processes[i].pid == target_pid){
             index = i;
             break;
         }  
