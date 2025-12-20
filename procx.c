@@ -121,7 +121,7 @@ void init_ipc() {
         is_creator = 1;
         printf("[IPC] İlk process başlatıldı (Creator).\n");
 
-        // Sadece ilk yaratan boyutlandırma (ftruncate) yapar
+        // Sadece ilk yaratan boyutlandırma (ftruncate) yapar, yoksa veri kaybı olur
         if (ftruncate(shm_fd, sizeof(SharedData)) == -1) {
             perror("ftruncate failed");
             shm_unlink(SHM_NAME); // Hata varsa temizle
@@ -163,7 +163,7 @@ void init_ipc() {
     close(fd);
 
     key_t key = ftok("/tmp/procx_msgfile", 65);
-    msg_queue_id = msgget(key, 0666 | IPC_CREAT);
+    msg_queue_id = msgget(key, 0666 | IPC_CREAT); //msgget : oluşturma, bağlanma | kuyruk yoksa oluşturur varsa kuyruk id bağlanır, tüm instancelar aynı kuyruğa bağlanır
     if (msg_queue_id == -1) {
         perror("msgget failed");
         exit(EXIT_FAILURE);
@@ -240,7 +240,7 @@ void send_notification(int command, pid_t target_pid){
     msg.sender_pid = getpid(); // gönderen pid
     msg.target_pid = target_pid; // hedef pid
 
-    if(msgsnd(msg_queue_id, &msg, MSGSZ, 0)== -1){
+    if(msgsnd(msg_queue_id, &msg, MSGSZ, 0)== -1){ // msgsnd : mesaj gönderme
         perror("magsnd failed");
     }
 }
@@ -270,7 +270,7 @@ int find_by_pid(pid_t pid){
 
 //shared memory kayıt ekleme fonksiyonu (paren process tarafinda cagirilacak)
 int add_process_record(pid_t child_pid, const char* command, ProcessMode mode){
-    sem_wait(g_sem); //kritik bolgeye giris yaptık (lock)
+    sem_wait(g_sem); //kritik bolgeye giris yaptık (lock) (race condition engellenir "ben işimi bitirene kadar kimse girmesin")
 
     int index = find_empty_process_slot(); // bos hucre buluyoruz (index:yeni processin yazilacagi yerin indexi)
 
@@ -418,7 +418,7 @@ void yeni_program_baslat(){
     }
 
 //Monitor Thread: periyodik olarak process durumlarını kontrol eder (health check, logging, dynamic scaling, cleanup)
-void *monitor_thread(void *arg){
+void *monitor_thread(void *arg){ //arka planda ölen processleri temizler
     int status;
 
     while(1){
